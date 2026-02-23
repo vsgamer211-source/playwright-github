@@ -1,4 +1,5 @@
 import { chromium } from "playwright";
+import fs from "fs";
 
 const url = process.env.TARGET_URL;
 
@@ -8,18 +9,61 @@ if (!url) {
 }
 
 (async () => {
-  const browser = await chromium.launch({ headless: true });
+  let browser;
 
-  const page = await browser.newPage();
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-blink-features=AutomationControlled"
+      ]
+    });
 
-  await page.goto(url, {
-    waitUntil: "domcontentloaded",
-    timeout: 60000
-  });
+    const context = await browser.newContext({
+      viewport: { width: 1366, height: 768 },
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+      locale: "en-US",
+      timezoneId: "Asia/Kolkata"
+    });
 
-  const title = await page.title();
+    const page = await context.newPage();
 
-  console.log("Title:", title);
+    // Remove webdriver flag
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", {
+        get: () => undefined
+      });
+    });
 
-  await browser.close();
+    console.log("Opening:", url);
+
+    await page.goto(url, {
+      waitUntil: "domcontentloaded",
+      timeout: 90000
+    });
+
+    // Wait for Cloudflare JS challenge if present
+    await page.waitForTimeout(8000);
+
+    // Small human-like delay
+    await page.mouse.move(200, 200);
+    await page.waitForTimeout(1000);
+
+    const title = await page.title();
+
+    const content = await page.content();
+
+    fs.writeFileSync("cf_page.html", content);
+
+    console.log("Title:", title);
+
+    await browser.close();
+  } catch (err) {
+    console.error("FAILED:", err.message);
+    if (browser) await browser.close();
+    process.exit(1);
+  }
 })();
